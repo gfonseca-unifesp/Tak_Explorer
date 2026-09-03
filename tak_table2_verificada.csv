@@ -1,0 +1,33 @@
+Region,Rank,Unique_reported,Unique_computed,Unique_match,Terminal_records_reported,Terminal_rows_computed,Terminal_match
+CCZ,Phylum,34,34,True,9001,25,False
+CCZ,Class,69,69,True,54815,47,False
+CCZ,Order,184,185,False,19449,83,False
+CCZ,Family,561,563,False,14733,297,False
+CCZ,Genus,1094,1095,False,46763,842,False
+CCZ,Species,860,860,True,22052,860,False
+CCZ,TOTAL_ROW_COUNT (rows in CSV),,,,166871,2155,False
+CCZ,Rows with NO rank identified,,,,,1,
+Indian Ocean,Phylum,20,20,True,15,8,False
+Indian Ocean,Class,32,32,True,448,15,False
+Indian Ocean,Order,69,70,False,59,8,False
+Indian Ocean,Family,140,140,True,99,21,False
+Indian Ocean,Genus,237,237,True,1973,234,False
+Indian Ocean,Species,7,7,True,177,7,False
+Indian Ocean,TOTAL_ROW_COUNT (rows in CSV),,,,2771,293,False
+Indian Ocean,Rows with NO rank identified,,,,,0,
+NW Pacific,Phylum,18,18,True,67,11,False
+NW Pacific,Class,36,36,True,218,22,False
+NW Pacific,Order,82,82,True,196,25,False
+NW Pacific,Family,165,165,True,417,70,False
+NW Pacific,Genus,192,192,True,1197,189,False
+NW Pacific,Species,3,3,True,4,3,False
+NW Pacific,TOTAL_ROW_COUNT (rows in CSV),,,,2099,320,False
+NW Pacific,Rows with NO rank identified,,,,,0,
+Mid Atlantic,Phylum,8,8,True,23,3,False
+Mid Atlantic,Class,14,14,True,50,8,False
+Mid Atlantic,Order,23,23,True,92,9,False
+Mid Atlantic,Family,23,23,True,106,11,False
+Mid Atlantic,Genus,17,17,True,469,17,False
+Mid Atlantic,Species,0,0,True,0,0,True
+Mid Atlantic,TOTAL_ROW_COUNT (rows in CSV),,,,740,48,False
+Mid Atlantic,Rows with NO rank identified,,,,,0,

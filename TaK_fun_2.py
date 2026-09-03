@@ -79,27 +79,42 @@ def TaK(input_matrix, group_col="Phylum", dataset_col="Station", count_col="indi
 
     # --- 5. TC Calculation (Completeness) ---
     # Count number of unique entries for each group and station/dataset and then adds the weighted sums for each case
-    tc_tr_data = df.groupby([dataset_col, group_col]).agg(
-        n_lines=(group_col, 'size'),
+    # NOTE on naming: `unique_taxa` counts distinct taxonomic lineage rows per
+    # dataset_col x group_col (the "taxa uniques" count, analogous to the
+    # first number in each manuscript Table 2 cell). `n_individuals` is the
+    # summed count_col (individuals or a density-style estimate depending on
+    # the source data), NOT a count of underlying occurrence records — the
+    # two are not interchangeable (see REPORT_revisao_R2.md, Task 1). This
+    # function does not compute a per-rank "terminal identification record"
+    # breakdown like manuscript Table 2; that is a different, rank-by-rank
+    # calculation, and pandas' groupby (unlike R's dplyr) silently drops rows
+    # with a missing group_col value — see REPORT_revisao_R2.md for the
+    # parity implication.
+    # dropna=False keeps rows with a missing group_col value as their own
+    # group, matching R's dplyr::group_by() (which keeps NA as a group by
+    # default) — pandas drops such rows silently otherwise, a real parity
+    # gap confirmed against the R implementation (see REPORT_revisao_R2.md).
+    tc_tr_data = df.groupby([dataset_col, group_col], dropna=False).agg(
+        unique_taxa=(group_col, 'size'),
         n_individuals=(count_col, 'sum'),
         Weighted_Sum=('Row_Sum_W', 'sum'),
         Weighted_Sum_Total=('RSW*n', 'sum'),
-        Weighted_Sum_Potential=('RSP*n', 'sum') 
+        Weighted_Sum_Potential=('RSP*n', 'sum')
     ).reset_index()
     # TC considers the number of individuals, so it is the ratio (sum RSW*n)/(sum RSP*n)
     tc_tr_data['TC'] = tc_tr_data['Weighted_Sum_Total'] / (tc_tr_data['Weighted_Sum_Potential'])
 
     # --- 6. TR Calculation (Resolution) ---
     # Resolution considers just each lineage, regardless of relative abundance
-    tc_tr_data['TR'] = tc_tr_data['Weighted_Sum']/(tc_tr_data['n_lines']*max_potential_weight) 
-    
+    tc_tr_data['TR'] = tc_tr_data['Weighted_Sum']/(tc_tr_data['unique_taxa']*max_potential_weight)
+
     # --- 7. Prepare the output
-    # Return variables are the summary table, 
+    # Return variables are the summary table,
     summary_dataset = tc_tr_data.copy().drop(columns=['Weighted_Sum', 'Weighted_Sum_Total', 'Weighted_Sum_Potential'])
     summary_dataset = summary_dataset.rename(columns={dataset_col: 'Dataset', group_col: 'Group'})
     # Descriptive statistics variables
     stats_list = summary_dataset.groupby('Group').agg(
-        Total_Lineages=('n_lines', 'sum'),
+        Total_unique_taxa=('unique_taxa', 'sum'),
         Total_Individuals=('n_individuals', 'sum'),
         TR_Median=('TR', 'median'),
         TC_Median=('TC', 'median')
@@ -129,7 +144,7 @@ results = TaK(
 # --- Verification Table ---
 print("Performance Summary by Phylum Group:")
 # Selecionando colunas específicas para o resumo
-median_tak = results['descriptive_stats'][['Group', 'Total_Lineages', 'Total_Individuals','TR_Median', 'TC_Median']]
+median_tak = results['descriptive_stats'][['Group', 'Total_unique_taxa', 'Total_Individuals','TR_Median', 'TC_Median']]
 print(median_tak)
 
 # --- Plotting ---

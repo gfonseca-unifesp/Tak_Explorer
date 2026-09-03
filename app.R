@@ -23,9 +23,18 @@ library(scales)
 library(readr)
 
 # --- 1. Function ---
+# NOTE on naming: `unique_taxa` counts distinct taxonomic lineage rows per
+# Dataset x group_col (the "taxa uniques" count, analogous to the first
+# number in each manuscript Table 2 cell). `Total_N` is the summed
+# Abundance/count column (individuals or a density-style estimate depending
+# on the source data), NOT a count of underlying occurrence records — the
+# two are not interchangeable (see REPORT_revisao_R2.md, Task 1). This
+# function does not compute a per-rank "terminal identification record"
+# breakdown like manuscript Table 2; that is a different, rank-by-rank
+# calculation.
 calculate_TaK_shiny <- function(data, weight_vector) {
-  meta_cols <- c("Dataset", "Abundance", "Row_Sum_W", "Row_Sum_P", "Total_N", 
-                 "n_Obs", "n_Prop", "W_Obs", "W_Prop", "n_Lineages", "TR", "TC")
+  meta_cols <- c("Dataset", "Abundance", "Row_Sum_W", "Row_Sum_P", "Total_N",
+                 "n_Obs", "n_Prop", "W_Obs", "W_Prop", "unique_taxa", "TR", "TC")
   tax_cols <- setdiff(names(data), meta_cols)
   
   if(length(tax_cols) == 0) return(NULL)
@@ -51,7 +60,7 @@ calculate_TaK_shiny <- function(data, weight_vector) {
       W_Obs   = sum(Row_Sum_W, na.rm = TRUE),
       W_Prop  = sum(Row_Sum_P, na.rm = TRUE),
       Total_N = sum(Abundance, na.rm = TRUE),
-      n_Lineages = n(),
+      unique_taxa = n(),
       .groups = 'drop'
     ) %>%
     mutate(
@@ -76,8 +85,12 @@ ui <- page_navbar(
                 numericInput("row_count", "Number of Lineages:", value = 66, min = 1),
                 actionButton("add_column", "Add taxonomic column", icon = icon("plus")),
                 hr(),
-                selectInput("label_choice", "Point label (Biplot):", 
+                selectInput("label_choice", "Point label (Biplot):",
                             choices = c("Dataset" = "Dataset", "Lineage" = "Lineage")),
+                hr(),
+                numericInput("low_confidence_threshold",
+                             "Low-confidence threshold (min. records per group):",
+                             value = 10, min = 0),
                 actionButton("reset_data", "Reset App", class = "btn-warning w-100")
               ),
               card(
@@ -250,7 +263,18 @@ Dataset_Class;P2;C2;;;;;100"
   
   observeEvent(input$editable_table_cell_edit, { v$data <<- editData(v$data, input$editable_table_cell_edit) })
   
-  processed_results <- reactive({ req(v$data); calculate_TaK_shiny(v$data, current_weights()) })
+  # Confidence is a display-only flag (does NOT change TR/TC): groups with
+  # fewer records (Total_N, i.e. summed Abundance) than the sidebar
+  # threshold are marked "Low confidence" per Reviewer #2's request about
+  # sensitivity to sparse data.
+  processed_results <- reactive({
+    req(v$data)
+    res <- calculate_TaK_shiny(v$data, current_weights())
+    req(res)
+    threshold <- if (is.null(input$low_confidence_threshold)) 10 else input$low_confidence_threshold
+    res$Confidence <- ifelse(res$Total_N < threshold, "Low confidence", "OK")
+    res
+  })
   
   summary_df <- reactive({
     res <- processed_results()
@@ -262,7 +286,7 @@ Dataset_Class;P2;C2;;;;;100"
         Mean_TC = mean(TC, na.rm = TRUE),
         Total_Individuals = sum(Total_N, na.rm = TRUE),
         Taxa_Groups_Count = n(),
-        Total_Lineages = sum(n_Lineages, na.rm = TRUE),
+        Total_unique_taxa = sum(unique_taxa, na.rm = TRUE),
         .groups = 'drop'
       ) %>%
       mutate(across(c(Mean_TR, Mean_TC), ~round(., 3)))
@@ -280,9 +304,11 @@ Dataset_Class;P2;C2;;;;;100"
       annotate("rect", xmin=0, xmax=0.5, ymin=0.5, ymax=1, fill="#3498db", alpha=0.1) +
       annotate("rect", xmin=0, xmax=0.5, ymin=0, ymax=0.5, fill="#e74c3c", alpha=0.1) +
       annotate("rect", xmin=0.5, xmax=1, ymin=0, ymax=0.5, fill="#f1c40f", alpha=0.1) +
-      geom_point(aes(size=Total_N), alpha=0.7) +
+      geom_point(aes(size=Total_N, shape=Confidence), alpha=0.7) +
       geom_text_repel(aes(label = .data[[label_col]])) +
       geom_abline(intercept=0, slope=1, linetype="dashed") +
+      scale_shape_manual(values = c("OK" = 16, "Low confidence" = 1),
+                          name = "Confidence") +
       scale_x_continuous(limits=c(0, 1.05)) + scale_y_continuous(limits=c(0, 1.05)) +
       theme_minimal() + theme(legend.position = "bottom")
   })

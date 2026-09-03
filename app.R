@@ -22,53 +22,12 @@ library(DT)
 library(scales)
 library(readr)
 
-# --- 1. Function ---
-# NOTE on naming: `unique_taxa` counts distinct taxonomic lineage rows per
-# Dataset x group_col (the "taxa uniques" count, analogous to the first
-# number in each manuscript Table 2 cell). `Total_N` is the summed
-# Abundance/count column (individuals or a density-style estimate depending
-# on the source data), NOT a count of underlying occurrence records — the
-# two are not interchangeable (see REPORT_revisao_R2.md, Task 1). This
-# function does not compute a per-rank "terminal identification record"
-# breakdown like manuscript Table 2; that is a different, rank-by-rank
-# calculation.
-calculate_TaK_shiny <- function(data, weight_vector) {
-  meta_cols <- c("Dataset", "Abundance", "Row_Sum_W", "Row_Sum_P", "Total_N",
-                 "n_Obs", "n_Prop", "W_Obs", "W_Prop", "unique_taxa", "TR", "TC")
-  tax_cols <- setdiff(names(data), meta_cols)
-  
-  if(length(tax_cols) == 0) return(NULL)
-  
-  weights <- if (length(weight_vector) != length(tax_cols)) seq_along(tax_cols) else weight_vector
-  rank_weights <- setNames(weights, tax_cols)
-  max_potential_weight <- sum(weights)
-  
-  data$Abundance <- as.numeric(replace_na(as.character(data$Abundance), "0"))
-  tax_matrix <- data[, tax_cols, drop = FALSE]
-  is_identified <- !is.na(tax_matrix) & tax_matrix != "NA" & tax_matrix != ""
-  
-  data$Row_Sum_W <- as.matrix(is_identified) %*% rank_weights
-  data$Row_Sum_P <- max_potential_weight
-  
-  group_col <- tax_cols[1]
-  
-  main_results <- data %>%
-    group_by(Dataset, .data[[group_col]]) %>%
-    summarise(
-      n_Obs   = sum(Abundance * Row_Sum_W, na.rm = TRUE),
-      n_Prop  = sum(Abundance * Row_Sum_P, na.rm = TRUE),
-      W_Obs   = sum(Row_Sum_W, na.rm = TRUE),
-      W_Prop  = sum(Row_Sum_P, na.rm = TRUE),
-      Total_N = sum(Abundance, na.rm = TRUE),
-      unique_taxa = n(),
-      .groups = 'drop'
-    ) %>%
-    mutate(
-      TR = ifelse(W_Prop > 0, W_Obs / W_Prop, 0),
-      TC = ifelse(n_Prop > 0, n_Obs / n_Prop, 0)
-    )
-  return(main_results)
-}
+# --- 1. Functions ---
+# calculate_TaK_shiny() (main index), rarefy_tak() and draw_rarefaction_plot()
+# (Sampling Sensitivity tab) all live in TaK_fun_1.R now, sourced from here
+# instead of duplicated inline -- keeps the Shiny app and the standalone R
+# function permanently in sync (see README, "Repository structure").
+source("TaK_fun_1.R")
 
 # --- 2. INTERFACE (UI) ---
 ui <- page_navbar(
@@ -134,6 +93,50 @@ ui <- page_navbar(
                 downloadButton("download_summary", "Download Summary CSV", class = "btn-success btn-sm")
               ),
               DTOutput("summary_table")
+            )
+  ),
+
+  nav_panel("Sampling Sensitivity",
+            layout_sidebar(
+              sidebar = sidebar(
+                title = "Rarefaction settings",
+                helpText("Checks whether TR and TC stay stable as fewer",
+                         "taxonomic records are sampled. TR is an",
+                         "unweighted mean over unique lineages, so it is",
+                         "expected to stay flat. TC is abundance-weighted",
+                         "and can shift if a Dataset's abundance is",
+                         "concentrated in a few coarsely-identified",
+                         "lineages -- this tab lets you check that",
+                         "directly on your own data."),
+                numericInput("rarefaction_n_boot", "Bootstrap draws per level:",
+                             value = 100, min = 10, max = 1000, step = 10),
+                sliderInput("rarefaction_min_frac", "Minimum sampled proportion (%):",
+                            min = 5, max = 50, value = 10, step = 5),
+                numericInput("rarefaction_steps", "Number of sampling levels:",
+                             value = 10, min = 3, max = 20),
+                actionButton("run_rarefaction", "Run rarefaction analysis",
+                             class = "btn-primary w-100"),
+                helpText("Datasets with fewer than 4 records are skipped.",
+                         "Re-run after changing the weight vector or",
+                         "editing data in the Data Editor tab -- this",
+                         "analysis does not update automatically.")
+              ),
+              card(
+                card_header(
+                  class = "d-flex justify-content-between align-items-center",
+                  "TR & TC vs. sampling effort",
+                  downloadButton("download_rarefaction_plot", "PNG", class = "btn-sm")
+                ),
+                plotOutput("rarefaction_plot", height = "500px")
+              ),
+              card(
+                card_header(
+                  class = "d-flex justify-content-between align-items-center",
+                  "Rarefaction data",
+                  downloadButton("download_rarefaction_data", "Download CSV", class = "btn-sm")
+                ),
+                DTOutput("rarefaction_table")
+              )
             )
   )
 )
@@ -357,6 +360,63 @@ Dataset_Class;P2;C2;;;;;100"
     content = function(file) { ggsave(file, plot = plot_quadrant(), width = 10, height = 7, dpi = 300) }
   )
   
+  # --- Sampling Sensitivity (rarefaction) ---
+  # Deliberately NOT reactive to every input change (unlike the Biplot /
+  # Summary tabs) -- a bootstrap sweep over all sampling levels takes a
+  # few seconds even for a mid-sized dataset, so it only reruns when the
+  # user explicitly clicks "Run rarefaction analysis".
+  rarefaction_fractions <- reactive({
+    steps <- input$rarefaction_steps
+    min_frac <- input$rarefaction_min_frac / 100
+    if (is.null(steps) || is.null(min_frac) || is.na(steps) || steps < 2) {
+      return(seq(0.1, 1, by = 0.1))
+    }
+    seq(min_frac, 1, length.out = steps)
+  })
+
+  rarefaction_result <- eventReactive(input$run_rarefaction, {
+    req(v$data)
+    n_boot <- if (is.null(input$rarefaction_n_boot) || is.na(input$rarefaction_n_boot))
+      100 else input$rarefaction_n_boot
+    fractions <- rarefaction_fractions()
+    withProgress(message = "Running rarefaction analysis", value = 0, {
+      rarefy_tak(v$data, current_weights(), fractions = fractions, n_boot = n_boot,
+                 progress_callback = function(step, total) {
+                   incProgress(1 / total, detail = sprintf("%d of %d", step, total))
+                 })
+    })
+  })
+
+  output$rarefaction_plot <- renderPlot({
+    res <- rarefaction_result()
+    validate(need(!is.null(res),
+                  "No Dataset in the current data has 4 or more records -- rarefaction needs at least that many lineages to subsample."))
+    draw_rarefaction_plot(res)
+  })
+
+  output$rarefaction_table <- renderDT({
+    res <- rarefaction_result()
+    req(res)
+    datatable(res %>% mutate(across(where(is.numeric), ~round(., 4))),
+              options = list(pageLength = 10, dom = 'tip'))
+  })
+
+  output$download_rarefaction_plot <- downloadHandler(
+    filename = function() { paste("rarefaction_", Sys.Date(), ".png", sep = "") },
+    content = function(file) {
+      res <- rarefaction_result(); req(res)
+      ggsave(file, plot = draw_rarefaction_plot(res), width = 10, height = 5.5, dpi = 300)
+    }
+  )
+
+  output$download_rarefaction_data <- downloadHandler(
+    filename = function() { paste("rarefaction_data_", Sys.Date(), ".csv", sep = "") },
+    content = function(file) {
+      res <- rarefaction_result(); req(res)
+      write.csv(res, file, row.names = FALSE)
+    }
+  )
+
   observeEvent(input$reset_data, { session$reload() })
 }
 

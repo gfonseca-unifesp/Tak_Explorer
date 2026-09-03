@@ -1,7 +1,15 @@
 # 1. DINAMIC FUNCTION -----------------
+# NOTE on naming: `unique_taxa` counts distinct taxonomic lineage rows per
+# Dataset x group_col (i.e. the "taxa uniques" count, analogous to the first
+# number in each Table 2 cell). `Total_N` is the summed Abundance/count column
+# (individuals or a density-style estimate depending on the source data), NOT
+# a count of underlying occurrence records — the two are not interchangeable
+# (see REPORT_revisao_R2.md, Task 1). This function does not compute a
+# per-rank "terminal identification record" breakdown like manuscript
+# Table 2; that is a structurally different, rank-by-rank calculation.
 calculate_TaK_shiny <- function(data, weight_vector) {
-  meta_cols <- c("Dataset", "Abundance", "Row_Sum_W", "Row_Sum_P", "Total_N", 
-                 "n_Obs", "n_Prop", "W_Obs", "W_Prop", "n_Lineages", "TR", "TC")
+  meta_cols <- c("Dataset", "Abundance", "Row_Sum_W", "Row_Sum_P", "Total_N",
+                 "n_Obs", "n_Prop", "W_Obs", "W_Prop", "unique_taxa", "TR", "TC")
   tax_cols <- setdiff(names(data), meta_cols)
   
   if(length(tax_cols) == 0) return(NULL)
@@ -28,7 +36,7 @@ calculate_TaK_shiny <- function(data, weight_vector) {
       W_Obs   = sum(Row_Sum_W, na.rm = TRUE),
       W_Prop  = sum(Row_Sum_P, na.rm = TRUE),
       Total_N = sum(Abundance, na.rm = TRUE),
-      n_Lineages = n(),
+      unique_taxa = n(),
       .groups = 'drop'
     ) %>%
     mutate(

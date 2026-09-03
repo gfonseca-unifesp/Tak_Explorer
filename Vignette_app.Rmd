@@ -27,7 +27,7 @@ library(readr)
 # 1. TaK indices calculation
 
 ```{r function}
-source("TaK_funshiny.R")
+source("TaK_fun_1.R")
 ```
 
 
@@ -264,7 +264,7 @@ Dataset_Class;P2;C2;;;;;100"
         Mean_TC = mean(TC, na.rm = TRUE),
         Total_Individuals = sum(Total_N, na.rm = TRUE),
         Taxa_Groups_Count = n(),
-        Total_Lineages = sum(n_Lineages, na.rm = TRUE),
+        Total_unique_taxa = sum(unique_taxa, na.rm = TRUE),
         .groups = 'drop'
       ) %>%
       mutate(across(c(Mean_TR, Mean_TC), ~round(., 3)))

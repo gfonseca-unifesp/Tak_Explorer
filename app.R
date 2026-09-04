@@ -183,7 +183,7 @@ ui <- page_navbar(
                   "TR/TC by taxonomic rank",
                   downloadButton("download_rank_plot", "PNG", class = "btn-sm")
                 ),
-                plotOutput("rank_plot", height = "600px")
+                plotOutput("rank_plot")
               ),
               card(
                 card_header(
@@ -555,7 +555,19 @@ Dataset_Class;P2;C2;;;;;100"
                                rank_label = input$rank_plot_rank, top_n = rank_plot_topn())
   })
 
-  output$rank_plot <- renderPlot({ plot_rank_comparison() })
+  # A fixed plot height made rows bleed into each other once a rank had
+  # more than ~15-20 distinct values (Genus/Species easily have hundreds) --
+  # height now scales with how many rows are actually shown (after the Top
+  # N cap), on screen and in the PNG download alike, via the same
+  # rank_comparison_height_*() helpers so the two never drift apart.
+  rank_plot_n_shown <- reactive({
+    res <- rank_plot_result(); req(res)
+    rank_comparison_n_shown(res, rank_plot_topn())
+  })
+
+  output$rank_plot <- renderPlot({
+    plot_rank_comparison()
+  }, height = function() rank_comparison_height_px(rank_plot_n_shown()))
 
   output$rank_table <- renderDT({
     res <- rank_plot_result(); req(res)
@@ -565,7 +577,10 @@ Dataset_Class;P2;C2;;;;;100"
 
   output$download_rank_plot <- downloadHandler(
     filename = function() { paste("rank_comparison_", Sys.Date(), ".png", sep = "") },
-    content = function(file) { ggsave(file, plot = plot_rank_comparison(), width = 10, height = 7, dpi = 300) }
+    content = function(file) {
+      ggsave(file, plot = plot_rank_comparison(), width = 10,
+             height = rank_comparison_height_in(rank_plot_n_shown()), dpi = 300, bg = "white")
+    }
   )
 
   output$download_rank_data <- downloadHandler(

@@ -200,11 +200,28 @@ draw_rank_comparison_plot <- function(rank_df, metric = "TR", group_label = "Gro
 
   ggplot(rank_df, aes(x = Group, y = Rank, size = .data[[metric]], color = .data[[metric]])) +
     geom_point(alpha = 0.85) +
-    scale_size_continuous(range = c(1, 14), limits = c(0, 1), name = metric_label) +
+    scale_size_continuous(range = c(1, 10), limits = c(0, 1), name = metric_label) +
     scale_color_viridis_c(limits = c(0, 1), name = metric_label) +
     labs(x = group_label, y = rank_label,
          title = paste0(metric_label, " by ", rank_label, ", across ", group_label)) +
     theme_minimal(base_size = 12) +
     theme(axis.text.x = element_text(angle = 40, hjust = 1),
-          panel.grid.minor = element_blank())
+          panel.grid.minor = element_blank(),
+          plot.background = element_rect(fill = "white", color = NA))
 }
+
+# How many distinct Rank values a call to draw_rank_comparison_plot() with
+# this top_n will actually end up showing -- shared by the screen render
+# (dynamic plotOutput height) and the PNG download (dynamic ggsave height)
+# so a deep rank with many categories (Genus, Species) always gets enough
+# vertical room per row instead of a fixed plot height that made rows
+# bleed into each other once there were more than ~15-20 of them (caught
+# by rendering the real ISA_DeepData_2026.csv with Genus and looking at
+# the actual PNG, not assumed from the code).
+rank_comparison_n_shown <- function(rank_df, top_n = 30) {
+  n_total <- length(unique(rank_df$Rank))
+  if (is.finite(top_n) && top_n > 0) min(top_n, n_total) else n_total
+}
+
+rank_comparison_height_px <- function(n_shown) max(420, 140 + n_shown * 24)
+rank_comparison_height_in <- function(n_shown) max(4.5, 1.4 + n_shown * 0.24)

@@ -50,22 +50,48 @@ can explore the interface before uploading your own data.
 
 ## How the app is structured
 
-TaK Explorer is a single `page_navbar` app with four tabs:
+TaK Explorer is a single `page_navbar` app with five tabs:
 
 1. **Data Editor** — where your data lives. Upload a CSV, edit any cell
-   directly in the table (double-click), add extra taxonomic-rank columns,
-   set the weight vector (see below), and export what you have at any
-   point. Everything downstream reacts to this table.
-2. **Visualization** — the Biplot (TR vs. TC, one point per group, sized
+   directly in the table (double-click), add extra taxonomic-rank columns
+   or an optional Year column (see below), set the weight vector (see
+   below), and export what you have at any point. Everything downstream
+   reacts to this table. This is also where **Compare by** lives — a
+   single global control (Dataset, or Year once you have one) that decides
+   what "one point"/"one row" means throughout the whole app: Summary,
+   Biplot, the quadrant chart, Sampling Sensitivity, and Rank Comparison's
+   X axis all follow whatever it's set to.
+2. **Visualization** — the Biplot (TR vs. TC, one point per Group, sized
    by abundance) and a stacked bar chart showing what fraction of each
-   Dataset falls in each of the four quadrants. Both are downloadable as
-   publication-ready PNGs.
-3. **Summary** — one row per Dataset: mean TR/TC, total individuals, and
+   Group falls in each of the four quadrants. A **Show** filter in this
+   tab's own sidebar narrows both plots down to a single Group value
+   (e.g. just one Dataset) without changing how TR/TC were computed. Both
+   plots are downloadable as publication-ready PNGs.
+3. **Summary** — one row per Group: mean TR/TC, total individuals, and
    the count of unique taxa — a quick numeric readout to accompany the
    plots, downloadable as CSV.
 4. **Sampling Sensitivity** — a rarefaction/bootstrap check of *how much
    TR and TC depend on how much data you have*. See below — this is worth
    reading before you trust a TC value from a small or patchy dataset.
+5. **Rank Comparison** — a bubble plot with one taxonomic rank's values on
+   the Y axis (you choose which rank — Phylum, Genus, whatever) and the
+   current **Compare by** dimension on the X axis; bubble size and color
+   both encode TR or TC (you choose which metric). Useful for spotting,
+   at a glance, which specific taxa are driving a Group's overall score —
+   the Biplot only shows you the Group-level average. A **Top N** control
+   keeps deep ranks (Genus, Species can easily have hundreds of distinct
+   values) limited to the most abundant entries so the plot stays
+   readable; raise it, or set it above the total count, to see everything.
+
+### Comparing by Year instead of Dataset
+
+Add an optional `Year` column (button in the Data Editor sidebar, or just
+include a `Year`/`year` column in your upload — it's auto-detected the
+same way the abundance column is) and **Compare by** gains a "Year"
+option. Switching to it pools records **across all Datasets** for each
+year — it's an either/or toggle, not a Dataset-by-Year cross-tabulation —
+so every plot and table in the app becomes "per year" instead of "per
+Dataset" everywhere at once, from one control.
 
 ### Why there's a "Sampling Sensitivity" tab
 
@@ -127,8 +153,12 @@ Upload a CSV (comma- or semicolon-delimited, auto-detected) with:
   `NA`) if that record wasn't identified that deep — don't guess or
   backfill.
 - A `Dataset` column, whatever grouping you want to compare by (a region,
-  a station, a year, a survey method). If missing, everything is treated
-  as one Dataset called `"Uploaded"`.
+  a station, a survey method). If missing, everything is treated as one
+  Dataset called `"Uploaded"`.
+- An optional `Year`/`year` column, auto-detected the same way as the
+  abundance column. Once present (with at least one value filled in),
+  **Compare by** (Data Editor sidebar) offers Year as an alternative to
+  Dataset — see "Comparing by Year instead of Dataset" above.
 - An abundance/count column, auto-detected under any of these names:
   `individualCount`, `n`, `Abundance`, `abundance`, `count`. If none of
   these is found, every record is assumed to represent 1 individual.

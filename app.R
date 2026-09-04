@@ -43,9 +43,19 @@ ui <- page_navbar(
                 textInput("weight_vec_str", "Weight Vector:", value = "1, 2, 3, 4, 5, 6"),
                 numericInput("row_count", "Number of Lineages:", value = 66, min = 1),
                 actionButton("add_column", "Add taxonomic column", icon = icon("plus")),
+                actionButton("add_year_column", "Add Year column", icon = icon("plus")),
+                hr(),
+                selectInput("primary_col", "Compare by:", choices = c("Dataset" = "Dataset")),
+                helpText("Governs Summary, Biplot, the quadrant chart, ",
+                         "Sampling Sensitivity and the Rank Comparison ",
+                         "tab's X axis. \"Year\" only appears once a Year ",
+                         "column exists with at least one value filled in ",
+                         "-- and when selected, records are pooled across ",
+                         "all Datasets for each year (not cross-tabulated ",
+                         "with Dataset)."),
                 hr(),
                 selectInput("label_choice", "Point label (Biplot):",
-                            choices = c("Dataset" = "Dataset", "Lineage" = "Lineage")),
+                            choices = c("Group" = "Group", "Rank" = "Rank")),
                 hr(),
                 numericInput("low_confidence_threshold",
                              "Low-confidence threshold (min. records per group):",
@@ -64,23 +74,33 @@ ui <- page_navbar(
   ),
   
   nav_panel("Visualization",
-            layout_column_wrap(
-              width = 1/2,
-              card(
-                card_header(
-                  class = "d-flex justify-content-between align-items-center",
-                  "Biplot (TR vs TC)",
-                  downloadButton("download_biplot", "PNG", class = "btn-sm")
-                ),
-                plotOutput("biplot", height = "500px")
+            layout_sidebar(
+              sidebar = sidebar(
+                title = "View settings",
+                selectInput("viz_group_filter", "Show:", choices = c("All")),
+                helpText("Filters both plots below to a single value of ",
+                         "whatever \"Compare by\" is set to (Data Editor ",
+                         "sidebar) -- a display filter only, it doesn't ",
+                         "change how TR/TC were computed.")
               ),
-              card(
-                card_header(
-                  class = "d-flex justify-content-between align-items-center",
-                  "Frequency per Quadrant",
-                  downloadButton("download_quadrant", "PNG", class = "btn-sm")
+              layout_column_wrap(
+                width = 1/2,
+                card(
+                  card_header(
+                    class = "d-flex justify-content-between align-items-center",
+                    "Biplot (TR vs TC)",
+                    downloadButton("download_biplot", "PNG", class = "btn-sm")
+                  ),
+                  plotOutput("biplot", height = "500px")
                 ),
-                plotOutput("quadrant_plot", height = "500px")
+                card(
+                  card_header(
+                    class = "d-flex justify-content-between align-items-center",
+                    "Frequency per Quadrant",
+                    downloadButton("download_quadrant", "PNG", class = "btn-sm")
+                  ),
+                  plotOutput("quadrant_plot", height = "500px")
+                )
               )
             )
   ),
@@ -136,6 +156,42 @@ ui <- page_navbar(
                   downloadButton("download_rarefaction_data", "Download CSV", class = "btn-sm")
                 ),
                 DTOutput("rarefaction_table")
+              )
+            )
+  ),
+
+  nav_panel("Rank Comparison",
+            layout_sidebar(
+              sidebar = sidebar(
+                title = "Rank Comparison settings",
+                selectInput("rank_plot_metric", "Metric (bubble size & color):",
+                            choices = c("Taxonomic Resolution (TR)" = "TR",
+                                        "Taxonomic Completeness (TC)" = "TC")),
+                selectInput("rank_plot_rank", "Taxonomic rank (Y axis):", choices = NULL),
+                numericInput("rank_plot_topn", "Show top N rank values (by abundance):",
+                             value = 30, min = 3, max = 300),
+                helpText("X axis follows \"Compare by\" (Data Editor ",
+                         "sidebar) -- Dataset or Year. Deep ranks (Genus, ",
+                         "Species) can have hundreds of distinct values; ",
+                         "Top N keeps only the most abundant ones so the ",
+                         "plot stays readable -- raise it to see more, or ",
+                         "set it above the total count to show everything.")
+              ),
+              card(
+                card_header(
+                  class = "d-flex justify-content-between align-items-center",
+                  "TR/TC by taxonomic rank",
+                  downloadButton("download_rank_plot", "PNG", class = "btn-sm")
+                ),
+                plotOutput("rank_plot", height = "600px")
+              ),
+              card(
+                card_header(
+                  class = "d-flex justify-content-between align-items-center",
+                  "Rank comparison data",
+                  downloadButton("download_rank_data", "Download CSV", class = "btn-sm")
+                ),
+                DTOutput("rank_table")
               )
             )
   )
@@ -228,22 +284,50 @@ Dataset_Class;P2;C2;;;;;100"
     v$data <- v$data %>% mutate(!!new_col_name := "") %>% select(1:(abund_idx-1), last_col(), Abundance)
     updateTextInput(session, "weight_vec_str", value = paste0(input$weight_vec_str, ", ", ncol(v$data)-2))
   })
-  
+
+  observeEvent(input$add_year_column, {
+    req(v$data)
+    if (!"Year" %in% names(v$data)) {
+      v$data <- v$data %>% mutate(Year = NA_character_, .after = "Dataset")
+    }
+  })
+
   current_weights <- reactive({ as.numeric(unlist(strsplit(input$weight_vec_str, ","))) })
-  
+
+  # "Compare by" drives every grouping/plot in the app (Summary, Biplot,
+  # quadrant chart, Sampling Sensitivity, Rank Comparison's X axis).
+  # "Year" only ever appears as a choice once the column exists AND has at
+  # least one non-blank value -- offering a grouping option that would
+  # produce nothing but an empty/NA group isn't didactic, it's confusing.
+  observe({
+    choices <- c("Dataset" = "Dataset")
+    if ("Year" %in% names(v$data) && any(!is.na(v$data$Year) & v$data$Year != "")) {
+      choices <- c(choices, "Year" = "Year")
+    }
+    selected <- if (!is.null(input$primary_col) && input$primary_col %in% choices) input$primary_col else "Dataset"
+    updateSelectInput(session, "primary_col", choices = choices, selected = selected)
+  })
+
+  current_primary_col <- reactive({
+    if (!is.null(input$primary_col) && input$primary_col %in% names(v$data)) input$primary_col else "Dataset"
+  })
+
   observeEvent(input$upload_csv, {
     req(input$upload_csv)
     line <- readLines(input$upload_csv$datapath, n = 1)
     sep <- if(grepl(";", line)) ";" else ","
     df <- read_delim(input$upload_csv$datapath, delim = sep, show_col_types = FALSE)
-    
+
     found_n <- intersect(names(df), c("individualCount", "n", "Abundance", "abundance", "count"))[1]
     if(!is.na(found_n)) df <- df %>% rename(Abundance = !!sym(found_n))
     if(!"Abundance" %in% names(df)) df$Abundance <- 1
     if(!"Dataset" %in% names(df)) df$Dataset <- "Uploaded"
-    
-    tax_cols <- setdiff(names(df), c("Dataset", "Abundance"))
-    v$data <- df %>% select(Dataset, all_of(tax_cols), Abundance) %>% as.data.frame()
+
+    found_year <- intersect(names(df), c("Year", "year", "YEAR"))[1]
+    if (!is.na(found_year) && found_year != "Year") df <- df %>% rename(Year = !!sym(found_year))
+
+    tax_cols <- setdiff(names(df), c("Dataset", "Year", "Abundance"))
+    v$data <- df %>% select(Dataset, any_of("Year"), all_of(tax_cols), Abundance) %>% as.data.frame()
     updateNumericInput(session, "row_count", value = nrow(v$data))
     updateTextInput(session, "weight_vec_str", value = paste(seq_along(tax_cols), collapse = ", "))
   })
@@ -272,18 +356,37 @@ Dataset_Class;P2;C2;;;;;100"
   # sensitivity to sparse data.
   processed_results <- reactive({
     req(v$data)
-    res <- calculate_TaK_shiny(v$data, current_weights())
+    res <- calculate_TaK_shiny(v$data, current_weights(), primary_col = current_primary_col())
     req(res)
     threshold <- if (is.null(input$low_confidence_threshold)) 10 else input$low_confidence_threshold
     res$Confidence <- ifelse(res$Total_N < threshold, "Low confidence", "OK")
     res
   })
-  
+
+  # Local display filter for the Visualization tab -- doesn't touch how
+  # TR/TC were computed, just which Group value(s) get plotted.
+  observe({
+    res <- processed_results()
+    req(res)
+    vals <- sort(unique(res$Group))
+    selected <- if (!is.null(input$viz_group_filter) && input$viz_group_filter %in% c("All", vals))
+      input$viz_group_filter else "All"
+    updateSelectInput(session, "viz_group_filter", choices = c("All", vals), selected = selected)
+  })
+
+  viz_filtered_results <- reactive({
+    res <- processed_results(); req(res)
+    if (!is.null(input$viz_group_filter) && input$viz_group_filter != "All") {
+      res <- res %>% filter(Group == input$viz_group_filter)
+    }
+    res
+  })
+
   summary_df <- reactive({
     res <- processed_results()
     req(res)
-    res %>%
-      group_by(Dataset) %>%
+    out <- res %>%
+      group_by(Group) %>%
       summarise(
         Mean_TR = mean(TR, na.rm = TRUE),
         Mean_TC = mean(TC, na.rm = TRUE),
@@ -293,16 +396,18 @@ Dataset_Class;P2;C2;;;;;100"
         .groups = 'drop'
       ) %>%
       mutate(across(c(Mean_TR, Mean_TC), ~round(., 3)))
+    names(out)[names(out) == "Group"] <- current_primary_col()
+    out
   })
-  
+
   output$summary_table <- renderDT({
     datatable(summary_df(), options = list(pageLength = 10, dom = 't'))
   })
-  
+
   plot_biplot <- reactive({
-    res <- processed_results(); req(res)
-    label_col <- if(input$label_choice == "Dataset") names(res)[1] else names(res)[2]
-    ggplot(res, aes(x = TC, y = TR, color = Dataset)) +
+    res <- viz_filtered_results(); req(res)
+    label_col <- if (!is.null(input$label_choice) && input$label_choice %in% names(res)) input$label_choice else "Group"
+    ggplot(res, aes(x = TC, y = TR, color = Group)) +
       annotate("rect", xmin=0.5, xmax=1, ymin=0.5, ymax=1, fill="#2ecc71", alpha=0.1) +
       annotate("rect", xmin=0, xmax=0.5, ymin=0.5, ymax=1, fill="#3498db", alpha=0.1) +
       annotate("rect", xmin=0, xmax=0.5, ymin=0, ymax=0.5, fill="#e74c3c", alpha=0.1) +
@@ -313,11 +418,12 @@ Dataset_Class;P2;C2;;;;;100"
       scale_shape_manual(values = c("OK" = 16, "Low confidence" = 1),
                           name = "Confidence") +
       scale_x_continuous(limits=c(0, 1.05)) + scale_y_continuous(limits=c(0, 1.05)) +
+      labs(color = current_primary_col()) +
       theme_minimal() + theme(legend.position = "bottom")
   })
-  
+
   plot_quadrant <- reactive({
-    res <- processed_results(); req(res)
+    res <- viz_filtered_results(); req(res)
     quad_data <- res %>%
       mutate(Quadrant = case_when(
         TC >= 0.5 & TR >= 0.5 ~ "Well resolved",
@@ -325,15 +431,16 @@ Dataset_Class;P2;C2;;;;;100"
         TC <  0.5 & TR <  0.5 ~ "Data deficient",
         TC >= 0.5 & TR <  0.5 ~ "Abundance biased"
       )) %>%
-      group_by(Dataset, Quadrant) %>%
+      group_by(Group, Quadrant) %>%
       summarise(Count = n(), .groups = 'drop_last') %>%
       mutate(Perc = Count / sum(Count))
-    
-    ggplot(quad_data, aes(x = Dataset, y = Perc, fill = Quadrant)) +
+
+    ggplot(quad_data, aes(x = Group, y = Perc, fill = Quadrant)) +
       geom_bar(stat = "identity", position = "fill", color = "white") +
       geom_text(aes(label = percent(Perc, accuracy = 1)), position = position_fill(vjust = 0.5), fontface="bold") +
       scale_fill_manual(values = c("Well resolved"="#2ecc71", "Under resolved"="#3498db", "Abundance biased"="#f1c40f", "Data deficient"="#e74c3c")) +
       scale_y_continuous(labels = percent) +
+      labs(x = current_primary_col()) +
       theme_minimal() + theme(legend.position = "bottom")
   })
   
@@ -380,7 +487,8 @@ Dataset_Class;P2;C2;;;;;100"
       100 else input$rarefaction_n_boot
     fractions <- rarefaction_fractions()
     withProgress(message = "Running rarefaction analysis", value = 0, {
-      rarefy_tak(v$data, current_weights(), fractions = fractions, n_boot = n_boot,
+      rarefy_tak(v$data, current_weights(), primary_col = current_primary_col(),
+                 fractions = fractions, n_boot = n_boot,
                  progress_callback = function(step, total) {
                    incProgress(1 / total, detail = sprintf("%d of %d", step, total))
                  })
@@ -390,8 +498,8 @@ Dataset_Class;P2;C2;;;;;100"
   output$rarefaction_plot <- renderPlot({
     res <- rarefaction_result()
     validate(need(!is.null(res),
-                  "No Dataset in the current data has 4 or more records -- rarefaction needs at least that many lineages to subsample."))
-    draw_rarefaction_plot(res)
+                  "No Group in the current data has 4 or more records -- rarefaction needs at least that many lineages to subsample."))
+    draw_rarefaction_plot(res, group_label = current_primary_col())
   })
 
   output$rarefaction_table <- renderDT({
@@ -405,7 +513,8 @@ Dataset_Class;P2;C2;;;;;100"
     filename = function() { paste("rarefaction_", Sys.Date(), ".png", sep = "") },
     content = function(file) {
       res <- rarefaction_result(); req(res)
-      ggsave(file, plot = draw_rarefaction_plot(res), width = 10, height = 5.5, dpi = 300)
+      ggsave(file, plot = draw_rarefaction_plot(res, group_label = current_primary_col()),
+             width = 10, height = 5.5, dpi = 300)
     }
   )
 
@@ -413,6 +522,56 @@ Dataset_Class;P2;C2;;;;;100"
     filename = function() { paste("rarefaction_data_", Sys.Date(), ".csv", sep = "") },
     content = function(file) {
       res <- rarefaction_result(); req(res)
+      write.csv(res, file, row.names = FALSE)
+    }
+  )
+
+  # --- Rank Comparison ---
+  observe({
+    req(v$data)
+    meta_cols <- c("Dataset", "Year", "Abundance")
+    tax_cols <- setdiff(names(v$data), meta_cols)
+    if (length(tax_cols) == 0) return()
+    selected <- if (!is.null(input$rank_plot_rank) && input$rank_plot_rank %in% tax_cols)
+      input$rank_plot_rank else tax_cols[1]
+    updateSelectInput(session, "rank_plot_rank", choices = tax_cols, selected = selected)
+  })
+
+  rank_plot_result <- reactive({
+    req(v$data, input$rank_plot_rank)
+    calculate_TaK_shiny(v$data, current_weights(), primary_col = current_primary_col(),
+                         rank_col = input$rank_plot_rank)
+  })
+
+  rank_plot_topn <- reactive({
+    n <- input$rank_plot_topn
+    if (is.null(n) || is.na(n) || n <= 0) 30 else n
+  })
+
+  plot_rank_comparison <- reactive({
+    res <- rank_plot_result(); req(res)
+    metric <- if (is.null(input$rank_plot_metric)) "TR" else input$rank_plot_metric
+    draw_rank_comparison_plot(res, metric = metric, group_label = current_primary_col(),
+                               rank_label = input$rank_plot_rank, top_n = rank_plot_topn())
+  })
+
+  output$rank_plot <- renderPlot({ plot_rank_comparison() })
+
+  output$rank_table <- renderDT({
+    res <- rank_plot_result(); req(res)
+    datatable(res %>% mutate(across(c(TR, TC), ~round(., 4))),
+              options = list(pageLength = 10, dom = 'tip'))
+  })
+
+  output$download_rank_plot <- downloadHandler(
+    filename = function() { paste("rank_comparison_", Sys.Date(), ".png", sep = "") },
+    content = function(file) { ggsave(file, plot = plot_rank_comparison(), width = 10, height = 7, dpi = 300) }
+  )
+
+  output$download_rank_data <- downloadHandler(
+    filename = function() { paste("rank_comparison_data_", Sys.Date(), ".csv", sep = "") },
+    content = function(file) {
+      res <- rank_plot_result(); req(res)
       write.csv(res, file, row.names = FALSE)
     }
   )

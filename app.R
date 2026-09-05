@@ -46,16 +46,14 @@ ui <- page_navbar(
                 actionButton("add_year_column", "Add Year column", icon = icon("plus")),
                 hr(),
                 selectInput("primary_col", "Compare by:", choices = c("Dataset" = "Dataset")),
-                helpText("Governs Summary, Biplot, the quadrant chart, ",
-                         "Sampling Sensitivity and the Rank Comparison ",
-                         "tab's X axis. \"Year\" only appears once a Year ",
-                         "column exists with at least one value filled in ",
-                         "-- and when selected, records are pooled across ",
-                         "all Datasets for each year (not cross-tabulated ",
-                         "with Dataset)."),
-                hr(),
-                selectInput("label_choice", "Point label (Biplot):",
-                            choices = c("Group" = "Group", "Rank" = "Rank")),
+                helpText("Governs Summary, Sampling Sensitivity and the ",
+                         "Rank Comparison tab's X axis, plus whichever of ",
+                         "\"Color points by\" (Visualization tab) is set ",
+                         "to Dataset/Year. \"Year\" only appears once a ",
+                         "Year column exists with at least one value ",
+                         "filled in -- and when selected, records are ",
+                         "pooled across all Datasets for each year (not ",
+                         "cross-tabulated with Dataset)."),
                 hr(),
                 numericInput("low_confidence_threshold",
                              "Low-confidence threshold (min. records per group):",
@@ -77,11 +75,24 @@ ui <- page_navbar(
             layout_sidebar(
               sidebar = sidebar(
                 title = "View settings",
+                selectInput("viz_color_by", "Color points by:",
+                            choices = c("Dataset / Year (Compare by)" = "Group",
+                                        "Taxonomic level" = "Rank")),
+                selectInput("viz_rank_col", "Taxonomic level:", choices = NULL),
+                helpText("Which taxonomic rank column each point ",
+                         "represents -- e.g. Phylum for the ISA data, but ",
+                         "any rank your data has. Only matters for the ",
+                         "two plots below (Summary always uses the first ",
+                         "taxonomic column, unaffected by this)."),
+                hr(),
                 selectInput("viz_group_filter", "Show:", choices = c("All")),
                 helpText("Filters both plots below to a single value of ",
-                         "whatever \"Compare by\" is set to (Data Editor ",
-                         "sidebar) -- a display filter only, it doesn't ",
-                         "change how TR/TC were computed.")
+                         "whichever \"Color points by\" is set to -- a ",
+                         "display filter only, it doesn't change how ",
+                         "TR/TC were computed."),
+                hr(),
+                selectInput("label_choice", "Point label:",
+                            choices = c("Group" = "Group", "Rank" = "Rank"))
               ),
               layout_column_wrap(
                 width = 1/2,
@@ -363,21 +374,61 @@ Dataset_Class;P2;C2;;;;;100"
     res
   })
 
-  # Local display filter for the Visualization tab -- doesn't touch how
-  # TR/TC were computed, just which Group value(s) get plotted.
+  # Taxonomic level picker for the Visualization tab specifically -- kept
+  # separate from Summary/Rank Comparison's own rank choices (each tab
+  # picks its own rank independently; Summary always aggregates at the
+  # first taxonomic column no matter what's chosen here).
   observe({
-    res <- processed_results()
+    req(v$data)
+    meta_cols <- c("Dataset", "Year", "Abundance")
+    tax_cols <- setdiff(names(v$data), meta_cols)
+    if (length(tax_cols) == 0) return()
+    selected <- if (!is.null(input$viz_rank_col) && input$viz_rank_col %in% tax_cols)
+      input$viz_rank_col else tax_cols[1]
+    updateSelectInput(session, "viz_rank_col", choices = tax_cols, selected = selected)
+  })
+
+  # Same Confidence-flagging as processed_results(), but computed at
+  # whatever rank_col "Taxonomic level" (Visualization tab) currently
+  # picks -- feeds only the Biplot/quadrant chart, so switching it never
+  # changes Summary's numbers.
+  viz_results <- reactive({
+    req(v$data, input$viz_rank_col)
+    res <- calculate_TaK_shiny(v$data, current_weights(), primary_col = current_primary_col(),
+                                rank_col = input$viz_rank_col)
     req(res)
-    vals <- sort(unique(res$Group))
+    threshold <- if (is.null(input$low_confidence_threshold)) 10 else input$low_confidence_threshold
+    res$Confidence <- ifelse(res$Total_N < threshold, "Low confidence", "OK")
+    res
+  })
+
+  # Which column "Color points by" currently means -- Group (Dataset/Year)
+  # or Rank (the taxonomic level above) -- shared by the Show filter, the
+  # Biplot's color aesthetic and the quadrant chart's X axis, so the three
+  # never disagree about what a color/bar represents.
+  viz_color_col <- reactive({
+    if (!is.null(input$viz_color_by) && input$viz_color_by == "Rank") "Rank" else "Group"
+  })
+
+  viz_color_label <- reactive({
+    if (viz_color_col() == "Rank") input$viz_rank_col else current_primary_col()
+  })
+
+  # Local display filter for the Visualization tab -- doesn't touch how
+  # TR/TC were computed, just which value(s) get plotted.
+  observe({
+    res <- viz_results()
+    req(res)
+    vals <- sort(unique(res[[viz_color_col()]]))
     selected <- if (!is.null(input$viz_group_filter) && input$viz_group_filter %in% c("All", vals))
       input$viz_group_filter else "All"
     updateSelectInput(session, "viz_group_filter", choices = c("All", vals), selected = selected)
   })
 
   viz_filtered_results <- reactive({
-    res <- processed_results(); req(res)
+    res <- viz_results(); req(res)
     if (!is.null(input$viz_group_filter) && input$viz_group_filter != "All") {
-      res <- res %>% filter(Group == input$viz_group_filter)
+      res <- res %>% filter(.data[[viz_color_col()]] == input$viz_group_filter)
     }
     res
   })
@@ -406,8 +457,9 @@ Dataset_Class;P2;C2;;;;;100"
 
   plot_biplot <- reactive({
     res <- viz_filtered_results(); req(res)
+    color_col <- viz_color_col()
     label_col <- if (!is.null(input$label_choice) && input$label_choice %in% names(res)) input$label_choice else "Group"
-    ggplot(res, aes(x = TC, y = TR, color = Group)) +
+    ggplot(res, aes(x = TC, y = TR, color = .data[[color_col]])) +
       annotate("rect", xmin=0.5, xmax=1, ymin=0.5, ymax=1, fill="#2ecc71", alpha=0.1) +
       annotate("rect", xmin=0, xmax=0.5, ymin=0.5, ymax=1, fill="#3498db", alpha=0.1) +
       annotate("rect", xmin=0, xmax=0.5, ymin=0, ymax=0.5, fill="#e74c3c", alpha=0.1) +
@@ -418,12 +470,13 @@ Dataset_Class;P2;C2;;;;;100"
       scale_shape_manual(values = c("OK" = 16, "Low confidence" = 1),
                           name = "Confidence") +
       scale_x_continuous(limits=c(0, 1.05)) + scale_y_continuous(limits=c(0, 1.05)) +
-      labs(color = current_primary_col()) +
+      labs(color = viz_color_label()) +
       theme_minimal() + theme(legend.position = "bottom")
   })
 
   plot_quadrant <- reactive({
     res <- viz_filtered_results(); req(res)
+    color_col <- viz_color_col()
     quad_data <- res %>%
       mutate(Quadrant = case_when(
         TC >= 0.5 & TR >= 0.5 ~ "Well resolved",
@@ -431,17 +484,18 @@ Dataset_Class;P2;C2;;;;;100"
         TC <  0.5 & TR <  0.5 ~ "Data deficient",
         TC >= 0.5 & TR <  0.5 ~ "Abundance biased"
       )) %>%
-      group_by(Group, Quadrant) %>%
+      group_by(.data[[color_col]], Quadrant) %>%
       summarise(Count = n(), .groups = 'drop_last') %>%
       mutate(Perc = Count / sum(Count))
 
-    ggplot(quad_data, aes(x = Group, y = Perc, fill = Quadrant)) +
+    ggplot(quad_data, aes(x = .data[[color_col]], y = Perc, fill = Quadrant)) +
       geom_bar(stat = "identity", position = "fill", color = "white") +
       geom_text(aes(label = percent(Perc, accuracy = 1)), position = position_fill(vjust = 0.5), fontface="bold") +
       scale_fill_manual(values = c("Well resolved"="#2ecc71", "Under resolved"="#3498db", "Abundance biased"="#f1c40f", "Data deficient"="#e74c3c")) +
       scale_y_continuous(labels = percent) +
-      labs(x = current_primary_col()) +
-      theme_minimal() + theme(legend.position = "bottom")
+      labs(x = viz_color_label()) +
+      theme_minimal() +
+      theme(legend.position = "bottom", axis.text.x = element_text(angle = 40, hjust = 1))
   })
   
   output$biplot <- renderPlot({ plot_biplot() })

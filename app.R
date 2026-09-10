@@ -7,8 +7,8 @@ install_missing_packages <- function(packages) {
   }
 }
 
-required_libs <- c("shiny", "bslib", "dplyr", "tidyr", "ggplot2", 
-                   "ggrepel", "DT", "scales", "readr")
+required_libs <- c("shiny", "bslib", "dplyr", "tidyr", "ggplot2",
+                   "ggrepel", "DT", "scales", "readr", "readxl")
 
 install_missing_packages(required_libs)
 
@@ -21,6 +21,7 @@ library(ggrepel)
 library(DT)
 library(scales)
 library(readr)
+library(readxl)
 
 # --- 1. Functions ---
 # calculate_TaK_shiny() (main index), rarefy_tak() and draw_rarefaction_plot()
@@ -38,7 +39,8 @@ ui <- page_navbar(
             layout_sidebar(
               sidebar = sidebar(
                 title = "Settings",
-                fileInput("upload_csv", "Upload CSV", accept = c(".csv", ".txt")),
+                fileInput("upload_csv", "Upload CSV or Excel",
+                          accept = c(".csv", ".txt", ".xlsx", ".xls")),
                 hr(),
                 textInput("weight_vec_str", "Weight Vector:", value = "1, 2, 3, 4, 5, 6"),
                 numericInput("row_count", "Number of Lineages:", value = 66, min = 1),
@@ -325,11 +327,27 @@ Dataset_Class;P2;C2;;;;;100"
 
   observeEvent(input$upload_csv, {
     req(input$upload_csv)
-    line <- readLines(input$upload_csv$datapath, n = 1)
-    sep <- if(grepl(";", line)) ";" else ","
-    df <- read_delim(input$upload_csv$datapath, delim = sep, show_col_types = FALSE)
+    path <- input$upload_csv$datapath
+    ext <- tolower(tools::file_ext(input$upload_csv$name))
 
-    found_n <- intersect(names(df), c("individualCount", "n", "Abundance", "abundance", "count"))[1]
+    df <- if (ext %in% c("xlsx", "xls")) {
+      as.data.frame(readxl::read_excel(path, sheet = 1))
+    } else {
+      # See detect_csv_encoding() (TaK_fun_1.R) -- a CSV saved as
+      # Windows-1252/Latin-1 (very common from Excel on Windows) read as
+      # UTF-8 doesn't error in R, but can corrupt the next outgoing Shiny
+      # websocket frame badly enough that the browser drops the
+      # connection. Encoding is detected once and reused both for
+      # sniffing the delimiter and for the real parse, so the two can't
+      # disagree.
+      encoding <- detect_csv_encoding(path)
+      line <- readLines(path, n = 1, encoding = encoding, warn = FALSE)
+      sep <- if (grepl(";", line)) ";" else ","
+      read_delim(path, delim = sep, show_col_types = FALSE,
+                 locale = locale(encoding = encoding))
+    }
+
+    found_n <- intersect(names(df), c("individualCount", "n", "Abundance", "abundance", "count", "N"))[1]
     if(!is.na(found_n)) df <- df %>% rename(Abundance = !!sym(found_n))
     if(!"Abundance" %in% names(df)) df$Abundance <- 1
     if(!"Dataset" %in% names(df)) df$Dataset <- "Uploaded"

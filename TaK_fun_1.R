@@ -1,3 +1,34 @@
+# 0. FILE-UPLOAD HELPERS -----------------
+# Detects the character encoding of an uploaded CSV/TXT file before
+# parsing it. Motivated by a real crash: a user-uploaded CSV
+# (FZA_DeepData_consolidado.csv) had at least one cell saved in
+# Windows-1252 ("ANSI", the default of Excel's "Save as CSV" on Windows --
+# extremely common for spreadsheets authored in Brazil/Latin America),
+# containing an em dash (byte 0x96) that isn't valid UTF-8 on its own.
+# read_delim() without an explicit locale assumes UTF-8, so that byte
+# survived into the data as an invalid string -- which didn't error in R
+# at all (confirmed: R-side logs showed nothing), but corrupted the next
+# outgoing Shiny websocket frame enough that the *browser* hard-rejected
+# it ("Could not decode a text frame as UTF-8"), killing that session's
+# connection -- what the user saw as "the app closed".
+#
+# readr::guess_encoding() alone isn't quite enough: run against the real
+# file, it reported "ISO-8859-1" at only 0.21 confidence -- decoding with
+# that literally turns 0x96 into a C1 control character (invisible,
+# wrong), not the em dash the author actually typed. Windows-1252 is a
+# proper superset of ISO-8859-1 in the printable range and correctly
+# decodes that exact byte to an em dash (verified against the real file
+# before writing this) -- so any non-ASCII/UTF-8 guess is treated as
+# Windows-1252 rather than taken literally, since that's overwhelmingly
+# the actual source encoding for a "Latin-1-ish" file coming out of
+# Windows Excel.
+detect_csv_encoding <- function(path) {
+  guess <- tryCatch(readr::guess_encoding(path, n_max = 10000), error = function(e) NULL)
+  if (is.null(guess) || nrow(guess) == 0) return("UTF-8")
+  top <- guess$encoding[1]
+  if (top %in% c("ASCII", "UTF-8")) "UTF-8" else "windows-1252"
+}
+
 # 1. CORE FUNCTION -----------------
 # NOTE on naming: `unique_taxa` counts distinct taxonomic lineage rows per
 # Group x Rank (i.e. the "taxa uniques" count, analogous to the first

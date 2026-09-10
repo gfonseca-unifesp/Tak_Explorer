@@ -146,7 +146,8 @@ columns (the app adapts to however many rank columns your data has, via
 
 ## Data format
 
-Upload a CSV (comma- or semicolon-delimited, auto-detected) with:
+Upload a CSV (comma- or semicolon-delimited, auto-detected) or an Excel
+file (`.xlsx`/`.xls`, first sheet only) with:
 
 - One column per taxonomic rank, in order from coarsest to finest (e.g.
   `Phylum, Class, Order, Family, Genus, Species`). Leave a cell blank (or
@@ -160,8 +161,15 @@ Upload a CSV (comma- or semicolon-delimited, auto-detected) with:
   **Compare by** (Data Editor sidebar) offers Year as an alternative to
   Dataset — see "Comparing by Year instead of Dataset" above.
 - An abundance/count column, auto-detected under any of these names:
-  `individualCount`, `n`, `Abundance`, `abundance`, `count`. If none of
-  these is found, every record is assumed to represent 1 individual.
+  `individualCount`, `n`, `N`, `Abundance`, `abundance`, `count`. If none
+  of these is found, every record is assumed to represent 1 individual.
+
+CSV encoding is auto-detected and doesn't need to be UTF-8 — a file
+saved as Windows-1252/"ANSI" (the default of Excel's "Save as CSV" on
+Windows, common for spreadsheets with accented characters) is read
+correctly rather than corrupting the upload. If you're working from
+Excel directly, uploading the `.xlsx` file avoids this question
+entirely.
 
 `example_data.csv` and `ISA_DeepData_2026.csv` (a real 4-region occurrence
 dataset from the International Seabed Authority's DeepData/OBIS node,
